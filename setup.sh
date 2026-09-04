@@ -2,7 +2,7 @@
 # ======================================================================
 #  Установка/удаление автообновления прошивки OpenWrt через ASU
 #  Тестовый сервер: https://sysupgrade.routerich.ru/
-#  Версия 6.1
+#  Версия 6.2 (с использованием owut)
 #  Репозиторий: https://github.com/fomslav/rr-openwrt-auto-upgrade
 # ======================================================================
 
@@ -28,10 +28,10 @@ log() {
 # --- Функция отображения статуса ---------------------------------------
 show_status() {
     echo "=== Текущий статус ==="
-    if opkg list-installed | grep -q auc; then
-        echo "  ✅ auc (клиент ASU) – установлен"
+    if opkg list-installed | grep -q owut; then
+        echo "  ✅ owut – установлен"
     else
-        echo "  ❌ auc – не установлен"
+        echo "  ❌ owut – не установлен"
     fi
     if opkg list-installed | grep -q luci-i18n-attendedsysupgrade-ru; then
         echo "  ✅ luci-i18n-attendedsysupgrade-ru – установлен"
@@ -92,9 +92,11 @@ install_func() {
     log "Обновление списков пакетов..."
     opkg update >>"$INSTALL_LOG" 2>&1
 
-    # 2. Установка базовых пакетов
-    log "Установка auc и luci-i18n-attendedsysupgrade-ru..."
-    opkg install auc luci-i18n-attendedsysupgrade-ru >>"$INSTALL_LOG" 2>&1
+    # 2. Установка базовых пакетов (по отдельности)
+    log "Установка owut..."
+    opkg install owut >>"$INSTALL_LOG" 2>&1
+    log "Установка luci-i18n-attendedsysupgrade-ru (если доступно)..."
+    opkg install luci-i18n-attendedsysupgrade-ru >>"$INSTALL_LOG" 2>&1 || true
 
     # 3. Подключение к тестовому серверу
     log "Подключение к тестовому серверу https://sysupgrade.routerich.ru/"
@@ -227,19 +229,19 @@ send_notification() {
 CURRENT_VER=$(cat /etc/openwrt_release 2>/dev/null | grep DISTRIB_RELEASE | cut -d"'" -f2)
 
 # Проверяем наличие обновления, перехватываем ошибки
-AUC_OUT=$(auc -c 2>&1)
-AUC_EXIT=$?
-if [ $AUC_EXIT -ne 0 ]; then
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - Ошибка при проверке обновлений: $AUC_OUT" >> "$LOG_FILE"
-    send_notification "❌ Ошибка при проверке обновлений на сервере. Код ошибки: $AUC_EXIT. Подробности в логе."
+OWUT_OUT=$(owut check 2>&1)
+OWUT_EXIT=$?
+if [ $OWUT_EXIT -ne 0 ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - Ошибка при проверке обновлений: $OWUT_OUT" >> "$LOG_FILE"
+    send_notification "❌ Ошибка при проверке обновлений на сервере. Код ошибки: $OWUT_EXIT. Подробности в логе."
     rm -f /tmp/do_upgrade
     exit 1
 fi
 
-echo "$AUC_OUT" >> "$LOG_FILE"
+echo "$OWUT_OUT" >> "$LOG_FILE"
 
-if echo "$AUC_OUT" | grep -qi "upgrade available"; then
-    NEW_VER=$(echo "$AUC_OUT" | grep -i "New version" | head -1 | sed -e 's/.*New version: //' -e 's/ .*//')
+if echo "$OWUT_OUT" | grep -qi "upgrade available"; then
+    NEW_VER=$(echo "$OWUT_OUT" | grep -i "New version" | head -1 | sed -e 's/.*New version: //' -e 's/ .*//')
     [ -z "$NEW_VER" ] && NEW_VER="неизвестна"
     touch /tmp/do_upgrade
     echo "$(date '+%Y-%m-%d %H:%M:%S') - Обновление доступно, создан флаг /tmp/do_upgrade" >> "$LOG_FILE"
@@ -285,23 +287,23 @@ if [ $? -ne 0 ]; then
 fi
 
 # 2. Запуск обновления
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Запуск auc -y -k" >> "$LOG_FILE"
-auc -y -k >>"$LOG_FILE" 2>&1
-AUC_EXIT=$?
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Запуск owut upgrade -y --keep-settings" >> "$LOG_FILE"
+owut upgrade -y --keep-settings >>"$LOG_FILE" 2>&1
+OWUT_EXIT=$?
 
-if [ $AUC_EXIT -eq 0 ]; then
+if [ $OWUT_EXIT -eq 0 ]; then
     echo "$(date '+%Y-%m-%d %H:%M:%S') - Обновление успешно установлено" >> "$LOG_FILE"
     # Создаём флаг успешного обновления для уведомления после перезагрузки
     echo "$(date '+%Y-%m-%d %H:%M:%S') - Создание флага /root/upgrade_success" >> "$LOG_FILE"
     echo "success" > /root/upgrade_success
-    # Перезагружаем роутер (если auc не перезагрузила сама)
+    # Перезагружаем роутер (если owut не перезагрузила сама)
     echo "$(date '+%Y-%m-%d %H:%M:%S') - Перезагрузка системы" >> "$LOG_FILE"
     reboot
 else
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - ОШИБКА обновления, код: $AUC_EXIT" >> "$LOG_FILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - ОШИБКА обновления, код: $OWUT_EXIT" >> "$LOG_FILE"
     # Отправляем уведомление об ошибке (используем тот же конфиг)
     . /root/notify_config
-    MESSAGE="❌ Ошибка при обновлении прошивки. Код: $AUC_EXIT. Проверьте лог $LOG_FILE"
+    MESSAGE="❌ Ошибка при обновлении прошивки. Код: $OWUT_EXIT. Проверьте лог $LOG_FILE"
     case "$NOTIFY_TYPE" in
         1|3)
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
@@ -398,7 +400,7 @@ uninstall_func() {
     log "Начинаем удаление всех компонентов..."
 
     # 1. Удаление пакетов
-    for pkg in auc luci-i18n-attendedsysupgrade-ru msmtp mailx curl; do
+    for pkg in owut luci-i18n-attendedsysupgrade-ru msmtp mailx curl; do
         if opkg list-installed | grep -q "^$pkg -"; then
             log "Удаляю пакет $pkg..."
             opkg remove $pkg >>"$INSTALL_LOG" 2>&1
@@ -483,7 +485,7 @@ main_menu() {
             echo
             echo "Вы выбрали УСТАНОВКУ и настройку."
             echo "Будут выполнены следующие действия:"
-            echo "  - Установка пакетов: auc, luci-i18n-attendedsysupgrade-ru"
+            echo "  - Установка пакетов: owut, luci-i18n-attendedsysupgrade-ru"
             echo "  - Подключение к тестовому серверу: https://sysupgrade.routerich.ru/"
             echo "  - Создание скриптов в /root/scripts/"
             echo "  - Настройка cron для проверки и установки обновлений"
@@ -504,7 +506,7 @@ main_menu() {
             echo
             echo "Вы выбрали УДАЛЕНИЕ всех компонентов."
             echo "Будут выполнены следующие действия:"
-            echo "  - Удаление пакетов: auc, luci-i18n-attendedsysupgrade-ru, msmtp, mailx, curl (если установлены)"
+            echo "  - Удаление пакетов: owut, luci-i18n-attendedsysupgrade-ru, msmtp, mailx, curl (если установлены)"
             echo "  - Удаление скриптов из /root/scripts/"
             echo "  - Удаление конфигурационных файлов (/etc/msmtprc, /root/notify_config)"
             echo "  - Удаление заданий cron, связанных с обновлением"
