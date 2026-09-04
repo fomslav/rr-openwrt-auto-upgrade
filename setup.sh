@@ -68,7 +68,7 @@ show_status() {
     else
         echo "  ❌ Запуск уведомления об успехе в rc.local – отсутствует"
     fi
-    SERVER_URL=$(uci get attendedsysupgrade.server.url 2>/dev/null)
+    SERVER_URL=$(uci get attendedsysupgrade.server.url 2>/dev/null) || true
     if [ -n "$SERVER_URL" ]; then
         echo "  🔗 Сервер ASU: $SERVER_URL"
     else
@@ -464,7 +464,7 @@ uninstall_func() {
 
 # --- Главное меню ------------------------------------------------------
 main_menu() {
-    clear
+#    clear
     echo "============================================================"
     echo "   Настройка / удаление автообновления прошивки OpenWrt"
     echo "   Тестовый сервер: https://sysupgrade.routerich.ru/"
