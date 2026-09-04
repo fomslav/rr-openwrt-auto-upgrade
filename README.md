@@ -149,17 +149,20 @@ rm /tmp/do_upgrade
 ---
 
 ## 📂 Структура создаваемых файлов
-/root/
-├── auto-upgrade-install.log # лог установки
-├── auto-upgrade-check.log # лог проверок
-├── auto-upgrade-upgrade.log # лог обновлений
-├── notify_config # конфиг уведомлений (токены, адреса)
-├── backups/ # папка с бэкапами конфигов
-│ └── backup-*.tar.gz
-└── scripts/
-├── check-and-notify.sh # проверка обновлений и уведомление
-├── auto-upgrade.sh # само обновление (с бэкапом и ребутом)
-└── send-success.sh # отправка уведомления об успехе после загрузки
 
-`/etc/crontabs/root` – добавляются две строки (проверка и обновление).
+```
+/root/
+├── auto-upgrade-install.log      # лог установки
+├── auto-upgrade-check.log        # лог проверок
+├── auto-upgrade-upgrade.log      # лог обновлений
+├── notify_config                 # конфиг уведомлений (токены, адреса)
+├── backups/                      # папка с бэкапами конфигов
+│   └── backup-*.tar.gz
+└── scripts/
+    ├── check-and-notify.sh       # проверка обновлений и уведомление
+    ├── auto-upgrade.sh           # само обновление (с бэкапом и ребутом)
+    └── send-success.sh           # отправка уведомления об успехе после загрузки
+```
+
+`/etc/crontabs/root` – добавляются две строки (проверка и обновление).  
 `/etc/rc.local` – добавляется запуск `/root/scripts/send-success.sh &`.
