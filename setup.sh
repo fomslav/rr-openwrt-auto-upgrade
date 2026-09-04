@@ -101,34 +101,29 @@ install_func() {
     uci set attendedsysupgrade.server.url='https://sysupgrade.routerich.ru/'
     uci commit attendedsysupgrade
 
-    # --- 4. Запрос способа уведомлений (с возможностью отмены) ---
+    # 4. Запрос данных для уведомлений (с возможностью отмены)
     while true; do
         echo
         echo "Выберите способ уведомлений:"
         echo "  1) Telegram (бот)"
         echo "  2) Email"
-        echo "  3) Telegram + Email (оба канала)"
+        echo "  3) Telegram + Email"
         echo "  0) Отменить установку и вернуться в главное меню"
         read -p "Введите номер: " notify_choice
 
         case "$notify_choice" in
             1|3)
-                # Для вариантов 1 и 3 запрашиваем Telegram
-                if [ "$notify_choice" = "1" ]; then
-                    NOTIFY_TYPE="telegram"
-                else
-                    NOTIFY_TYPE="telegram_email"
+                if [ "$notify_choice" = "1" ] || [ "$notify_choice" = "3" ]; then
+                    echo
+                    echo "Для Telegram-бота нужны:"
+                    read -p "Введите токен бота (например, 123456:ABC-DEF): " TELEGRAM_TOKEN
+                    read -p "Введите ваш Chat ID (число): " TELEGRAM_CHATID
+                    if ! command -v curl >/dev/null 2>&1; then
+                        log "Устанавливаю curl..."
+                        opkg install curl >>"$INSTALL_LOG" 2>&1
+                    fi
                 fi
-                echo
-                echo "Для Telegram-бота нужны:"
-                read -p "Введите токен бота (например, 123456:ABC-DEF): " TELEGRAM_TOKEN
-                read -p "Введите ваш Chat ID (число): " TELEGRAM_CHATID
-                if ! command -v curl >/dev/null 2>&1; then
-                    log "Устанавливаю curl..."
-                    opkg install curl >>"$INSTALL_LOG" 2>&1
-                fi
-                # Если выбрано 3, то после Telegram запрашиваем Email
-                if [ "$notify_choice" = "3" ]; then
+                if [ "$notify_choice" = "2" ] || [ "$notify_choice" = "3" ]; then
                     echo
                     echo "Для отправки email потребуется настроить SMTP."
                     read -p "Email получателя: " EMAIL_TO
@@ -156,34 +151,6 @@ EOF
                 fi
                 break
                 ;;
-            2)
-                NOTIFY_TYPE="email"
-                echo
-                echo "Для отправки email потребуется настроить SMTP."
-                read -p "Email получателя: " EMAIL_TO
-                read -p "SMTP сервер (например, smtp.gmail.com): " SMTP_SERVER
-                read -p "SMTP порт (обычно 587): " SMTP_PORT
-                read -p "SMTP логин (полный адрес): " SMTP_USER
-                read -p "SMTP пароль: " SMTP_PASS
-                log "Устанавливаю msmtp и mailx..."
-                opkg install msmtp mailx >>"$INSTALL_LOG" 2>&1
-                cat > /etc/msmtprc <<EOF
-defaults
-auth           on
-tls            on
-tls_trust_file /etc/ssl/certs/ca-certificates.crt
-logfile        /var/log/msmtp.log
-
-account        default
-host           $SMTP_SERVER
-port           $SMTP_PORT
-from           $SMTP_USER
-user           $SMTP_USER
-password       $SMTP_PASS
-EOF
-                chmod 600 /etc/msmtprc
-                break
-                ;;
             0)
                 log "Установка отменена пользователем."
                 echo "Возврат в главное меню."
@@ -195,60 +162,45 @@ EOF
         esac
     done
 
-    # --- 5. Настройка времени проверки и обновления ---
-    echo
-    echo "Настройка времени выполнения задач."
-    echo "По умолчанию: проверка в субботу в 20:00, обновление в воскресенье в 3:00."
-    read -p "Изменить время? (y/N): " change_time
-    if [ "$change_time" = "y" ] || [ "$change_time" = "Y" ]; then
-        echo "Введите время в формате HH:MM (например, 20:00 для 8 часов вечера)."
-        read -p "Время проверки (суббота): " check_time
-        read -p "Время обновления (воскресенье): " upgrade_time
-        # Проверка формата (простая)
-        CHECK_HOUR=$(echo "$check_time" | cut -d: -f1)
-        CHECK_MIN=$(echo "$check_time" | cut -d: -f2)
-        UPGRADE_HOUR=$(echo "$upgrade_time" | cut -d: -f1)
-        UPGRADE_MIN=$(echo "$upgrade_time" | cut -d: -f2)
-        if ! echo "$CHECK_HOUR" | grep -qE '^[0-9]+$' || [ "$CHECK_HOUR" -lt 0 ] || [ "$CHECK_HOUR" -gt 23 ] || \
-           ! echo "$CHECK_MIN" | grep -qE '^[0-9]+$' || [ "$CHECK_MIN" -lt 0 ] || [ "$CHECK_MIN" -gt 59 ] || \
-           ! echo "$UPGRADE_HOUR" | grep -qE '^[0-9]+$' || [ "$UPGRADE_HOUR" -lt 0 ] || [ "$UPGRADE_HOUR" -gt 23 ] || \
-           ! echo "$UPGRADE_MIN" | grep -qE '^[0-9]+$' || [ "$UPGRADE_MIN" -lt 0 ] || [ "$UPGRADE_MIN" -gt 59 ]; then
-            echo "❌ Неверный формат времени. Используются значения по умолчанию."
-            CHECK_TIME="20:00"
-            UPGRADE_TIME="03:00"
-        else
-            CHECK_TIME="$check_time"
-            UPGRADE_TIME="$upgrade_time"
-        fi
-    else
-        CHECK_TIME="20:00"
-        UPGRADE_TIME="03:00"
-    fi
-
-    # Извлекаем часы и минуты
-    CHECK_HOUR=$(echo "$CHECK_TIME" | cut -d: -f1)
-    CHECK_MIN=$(echo "$CHECK_TIME" | cut -d: -f2)
-    UPGRADE_HOUR=$(echo "$UPGRADE_TIME" | cut -d: -f1)
-    UPGRADE_MIN=$(echo "$UPGRADE_TIME" | cut -d: -f2)
-
-    # Сохраняем параметры уведомлений и времени в конфигурационный файл
+    # Сохраняем параметры уведомлений в конфигурационный файл
     cat > /root/notify_config <<EOF
-NOTIFY_TYPE="$NOTIFY_TYPE"
+NOTIFY_TYPE="$notify_choice"
 TELEGRAM_TOKEN="$TELEGRAM_TOKEN"
 TELEGRAM_CHATID="$TELEGRAM_CHATID"
 EMAIL_TO="$EMAIL_TO"
-CHECK_TIME="$CHECK_TIME"
-UPGRADE_TIME="$UPGRADE_TIME"
 EOF
     chmod 600 /root/notify_config
 
-    # --- 6. Создание скриптов ---
+    # 5. Запрос времени проверки и обновления
+    echo
+    echo "Введите день недели и время для ПРОВЕРКИ обновлений"
+    echo "(день недели: 0-6, где 0 - воскресенье, 6 - суббота; время в формате HH:MM)"
+    echo "Пример: 6 20:00 (суббота 20:00)"
+    read -p "Оставьте пустым, чтобы оставить по умолчанию: 6 20:00: " check_schedule
+    if [ -z "$check_schedule" ]; then
+        check_schedule="6 20:00"
+    fi
+    check_day=$(echo "$check_schedule" | awk '{print $1}')
+    check_time=$(echo "$check_schedule" | awk '{print $2}')
+
+    echo
+    echo "Введите день недели и время для УСТАНОВКИ обновлений"
+    echo "(день недели: 0-6, где 0 - воскресенье, 6 - суббота; время в формате HH:MM)"
+    echo "Пример: 0 03:00 (воскресенье 3:00)"
+    read -p "Оставьте пустым, чтобы оставить по умолчанию: 0 03:00: " upgrade_schedule
+    if [ -z "$upgrade_schedule" ]; then
+        upgrade_schedule="0 03:00"
+    fi
+    upgrade_day=$(echo "$upgrade_schedule" | awk '{print $1}')
+    upgrade_time=$(echo "$upgrade_schedule" | awk '{print $2}')
+
+    # 6. Создание скриптов
     mkdir -p /root/scripts
 
     # Скрипт проверки (check-and-notify.sh)
     cat > /root/scripts/check-and-notify.sh <<'EOF'
 #!/bin/sh
-# Скрипт проверки обновлений (суббота в заданное время)
+# Скрипт проверки обновлений (суббота 20:00)
 # Логирование
 LOG_FILE="/root/auto-upgrade-check.log"
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Запуск проверки обновлений" >> "$LOG_FILE"
@@ -260,18 +212,13 @@ echo "$(date '+%Y-%m-%d %H:%M:%S') - Запуск проверки обновл�
 send_notification() {
     local message="$1"
     case "$NOTIFY_TYPE" in
-        telegram)
+        1|3)
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
                  -d chat_id="${TELEGRAM_CHATID}" -d text="$message" >/dev/null
             ;;
-        email)
-            echo "$message" | mail -s "Обновление прошивки роутера" "$EMAIL_TO"
-            ;;
-        telegram_email)
-            # Отправляем в Telegram
-            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
-                 -d chat_id="${TELEGRAM_CHATID}" -d text="$message" >/dev/null
-            # Отправляем по Email
+    esac
+    case "$NOTIFY_TYPE" in
+        2|3)
             echo "$message" | mail -s "Обновление прошивки роутера" "$EMAIL_TO"
             ;;
     esac
@@ -297,11 +244,11 @@ if echo "$AUC_OUT" | grep -qi "upgrade available"; then
     touch /tmp/do_upgrade
     echo "$(date '+%Y-%m-%d %H:%M:%S') - Обновление доступно, создан флаг /tmp/do_upgrade" >> "$LOG_FILE"
 
-    MESSAGE="🔔 Внимание! Автоматическое обновление прошивки запланировано на сегодня в $UPGRADE_TIME.
+    MESSAGE="🔔 Внимание! Автоматическое обновление прошивки запланировано на сегодня в 3:00.
 Текущая версия: $CURRENT_VER
 Новая версия: $NEW_VER
 
-Для отмены обновления до $UPGRADE_TIME выполните на роутере:
+Для отмены обновления до 3:00 выполните на роутере:
   rm /tmp/do_upgrade
 
 Если вы согласны, ничего не делайте — обновление произойдёт автоматически."
@@ -315,7 +262,7 @@ EOF
     # Скрипт обновления (auto-upgrade.sh)
     cat > /root/scripts/auto-upgrade.sh <<'EOF'
 #!/bin/sh
-# Скрипт автоматического обновления (воскресенье в заданное время)
+# Скрипт автоматического обновления (воскресенье 3:00)
 LOG_FILE="/root/auto-upgrade-upgrade.log"
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Запуск скрипта обновления" >> "$LOG_FILE"
 
@@ -347,25 +294,23 @@ if [ $AUC_EXIT -eq 0 ]; then
     # Создаём флаг успешного обновления для уведомления после перезагрузки
     echo "$(date '+%Y-%m-%d %H:%M:%S') - Создание флага /root/upgrade_success" >> "$LOG_FILE"
     echo "success" > /root/upgrade_success
-    # Перезагружаем роутер
+    # Перезагружаем роутер (если auc не перезагрузила сама)
     echo "$(date '+%Y-%m-%d %H:%M:%S') - Перезагрузка системы" >> "$LOG_FILE"
     reboot
 else
     echo "$(date '+%Y-%m-%d %H:%M:%S') - ОШИБКА обновления, код: $AUC_EXIT" >> "$LOG_FILE"
-    # Отправляем уведомление об ошибке
+    # Отправляем уведомление об ошибке (используем тот же конфиг)
     . /root/notify_config
+    MESSAGE="❌ Ошибка при обновлении прошивки. Код: $AUC_EXIT. Проверьте лог $LOG_FILE"
     case "$NOTIFY_TYPE" in
-        telegram)
+        1|3)
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
-                 -d chat_id="${TELEGRAM_CHATID}" -d text="❌ Ошибка при обновлении прошивки. Код: $AUC_EXIT. Проверьте лог $LOG_FILE" >/dev/null
+                 -d chat_id="${TELEGRAM_CHATID}" -d text="$MESSAGE" >/dev/null
             ;;
-        email)
-            echo "❌ Ошибка при обновлении прошивки. Код: $AUC_EXIT. Проверьте лог $LOG_FILE" | mail -s "Ошибка обновления роутера" "$EMAIL_TO"
-            ;;
-        telegram_email)
-            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
-                 -d chat_id="${TELEGRAM_CHATID}" -d text="❌ Ошибка при обновлении прошивки. Код: $AUC_EXIT. Проверьте лог $LOG_FILE" >/dev/null
-            echo "❌ Ошибка при обновлении прошивки. Код: $AUC_EXIT. Проверьте лог $LOG_FILE" | mail -s "Ошибка обновления роутера" "$EMAIL_TO"
+    esac
+    case "$NOTIFY_TYPE" in
+        2|3)
+            echo "$MESSAGE" | mail -s "Ошибка обновления роутера" "$EMAIL_TO"
             ;;
     esac
 fi
@@ -383,16 +328,13 @@ if [ -f /root/upgrade_success ]; then
     . /root/notify_config
     MESSAGE="✅ Роутер успешно обновлён и перезагружен! Текущая версия: $(cat /etc/openwrt_release | grep DISTRIB_RELEASE | cut -d"'" -f2)"
     case "$NOTIFY_TYPE" in
-        telegram)
+        1|3)
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
                  -d chat_id="${TELEGRAM_CHATID}" -d text="$MESSAGE" >/dev/null
             ;;
-        email)
-            echo "$MESSAGE" | mail -s "Успешное обновление роутера" "$EMAIL_TO"
-            ;;
-        telegram_email)
-            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
-                 -d chat_id="${TELEGRAM_CHATID}" -d text="$MESSAGE" >/dev/null
+    esac
+    case "$NOTIFY_TYPE" in
+        2|3)
             echo "$MESSAGE" | mail -s "Успешное обновление роутера" "$EMAIL_TO"
             ;;
     esac
@@ -404,34 +346,38 @@ EOF
     chmod +x /root/scripts/auto-upgrade.sh
     chmod +x /root/scripts/send-success.sh
 
-    # --- 7. Настройка cron ---
+    # 7. Настройка cron
     log "Настройка заданий cron..."
     sed -i '/check-and-notify.sh/d' /etc/crontabs/root 2>/dev/null
     sed -i '/auto-upgrade.sh/d' /etc/crontabs/root 2>/dev/null
-    # Добавляем задания с выбранным временем
-    echo "# Проверка обновлений и уведомление (каждую субботу в $CHECK_TIME)" >> /etc/crontabs/root
-    echo "$CHECK_MIN $CHECK_HOUR * * 6 /root/scripts/check-and-notify.sh" >> /etc/crontabs/root
-    echo "# Автоматическое обновление (каждое воскресенье в $UPGRADE_TIME)" >> /etc/crontabs/root
-    echo "$UPGRADE_MIN $UPGRADE_HOUR * * 7 /root/scripts/auto-upgrade.sh" >> /etc/crontabs/root
+    echo "# Проверка обновлений и уведомление (каждую субботу в 20:00)" >> /etc/crontabs/root
+    echo "$check_time * * $check_day /root/scripts/check-and-notify.sh" >> /etc/crontabs/root
+    echo "# Автоматическое обновление (каждое воскресенье в 3:00)" >> /etc/crontabs/root
+    echo "$upgrade_time * * $upgrade_day /root/scripts/auto-upgrade.sh" >> /etc/crontabs/root
     /etc/init.d/cron restart
 
-    # --- 8. Настройка rc.local ---
+    # 8. Настройка rc.local для запуска send-success.sh после загрузки
     log "Настройка rc.local для отправки уведомления об успехе..."
     sed -i '/send-success.sh/d' /etc/rc.local 2>/dev/null
     sed -i '/exit 0/d' /etc/rc.local 2>/dev/null
     echo "/root/scripts/send-success.sh &" >> /etc/rc.local
     echo "exit 0" >> /etc/rc.local
 
-    # --- 9. Итоговый экран ---
+    # 9. Итоговый экран
     echo
     echo "============================================================"
     echo "✅ Установка и настройка завершены!"
     echo "============================================================"
     echo "📌 Расписание:"
-    echo "   - Суббота $CHECK_TIME – проверка обновлений и уведомление"
-    echo "   - Воскресенье $UPGRADE_TIME – автоматическое обновление (если флаг есть)"
+    echo "   - Проверка обновлений: день $check_day в $check_time"
+    echo "   - Установка обновлений: день $upgrade_day в $upgrade_time"
     echo
-    echo "📩 Уведомления через $NOTIFY_TYPE."
+    echo "📩 Уведомления:"
+    case "$notify_choice" in
+        1) echo "   - Telegram" ;;
+        2) echo "   - Email" ;;
+        3) echo "   - Telegram + Email" ;;
+    esac
     echo "🌐 Сервер ASU: https://sysupgrade.routerich.ru/"
     echo
     echo "📁 Логи и бэкапы:"
@@ -501,7 +447,7 @@ uninstall_func() {
         uci commit attendedsysupgrade
     fi
 
-    # 9. Логи и бэкапы остаются
+    # 9. Логи и бэкапы остаются (не удаляем, чтобы не потерять данные)
     echo "============================================================"
     echo "✅ Все компоненты удалены."
     echo "============================================================"
@@ -540,10 +486,9 @@ main_menu() {
             echo "  - Установка пакетов: auc, luci-i18n-attendedsysupgrade-ru"
             echo "  - Подключение к тестовому серверу: https://sysupgrade.routerich.ru/"
             echo "  - Создание скриптов в /root/scripts/"
-            echo "  - Настройка cron (вы можете задать время проверки и обновления)"
-            echo "  - Настройка выбранного способа уведомлений (Telegram, Email или оба)"
+            echo "  - Настройка cron для проверки и установки обновлений"
+            echo "  - Настройка выбранного способа уведомлений (Telegram или Email)"
             echo "  - Настройка автоматического уведомления об успехе после перезагрузки"
-            echo "  - Автоматический бэкап конфигурации перед обновлением"
             echo "  - Логирование всех операций"
             echo
             read -p "Продолжить? (y/N): " confirm
