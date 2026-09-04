@@ -35,10 +35,14 @@
 Скрипт запускается **одной командой** прямо из терминала – не нужно сохранять файл на роутере.
 
 ### Через `curl`
-`sh -c "$(curl -fsSL https://raw.githubusercontent.com/fomslav/rr-openwrt-auto-upgrade/main/setup.sh)"`
+```bash
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/fomslav/rr-openwrt-auto-upgrade/main/setup.sh)"
+```
 
 ### Через `wget`
-`sh -c "$(wget -qO- https://raw.githubusercontent.com/fomslav/rr-openwrt-auto-upgrade/main/setup.sh)"`
+```bash
+sh -c "$(wget -qO- https://raw.githubusercontent.com/fomslav/rr-openwrt-auto-upgrade/main/setup.sh)"
+```
 
 После запуска вы увидите текущий статус системы и главное меню с выбором действий.
 
