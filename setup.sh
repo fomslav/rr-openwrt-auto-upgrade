@@ -2,7 +2,7 @@
 # ======================================================================
 #  Установка/удаление автообновления прошивки OpenWrt через ASU
 #  Тестовый сервер: https://sysupgrade.routerich.ru/
-#  Версия 6.0
+#  Версия 6.1
 #  Репозиторий: https://github.com/fomslav/rr-openwrt-auto-upgrade
 # ======================================================================
 
@@ -53,17 +53,17 @@ show_status() {
     else
         echo "  ❌ Скрипт уведомления об успехе – отсутствует"
     fi
-    if grep -q "check-and-notify.sh" /etc/crontabs/root 2>/dev/null; then
+    if [ -f /etc/crontabs/root ] && grep -q "check-and-notify.sh" /etc/crontabs/root; then
         echo "  ✅ Задание cron (проверка) – активно"
     else
         echo "  ❌ Задание cron (проверка) – отсутствует"
     fi
-    if grep -q "auto-upgrade.sh" /etc/crontabs/root 2>/dev/null; then
+    if [ -f /etc/crontabs/root ] && grep -q "auto-upgrade.sh" /etc/crontabs/root; then
         echo "  ✅ Задание cron (обновление) – активно"
     else
         echo "  ❌ Задание cron (обновление) – отсутствует"
     fi
-    if grep -q "/root/scripts/send-success.sh" /etc/rc.local 2>/dev/null; then
+    if [ -f /etc/rc.local ] && grep -q "/root/scripts/send-success.sh" /etc/rc.local; then
         echo "  ✅ Запуск уведомления об успехе в rc.local – присутствует"
     else
         echo "  ❌ Запуск уведомления об успехе в rc.local – отсутствует"
