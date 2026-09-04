@@ -2,7 +2,7 @@
 # ======================================================================
 #  Установка/удаление автообновления прошивки OpenWrt через ASU
 #  Тестовый сервер: https://sysupgrade.routerich.ru/
-#  Версия 6.2 (с использованием owut)
+#  Версия 6.3 (использование msmtp напрямую, без mailx)
 #  Репозиторий: https://github.com/fomslav/rr-openwrt-auto-upgrade
 # ======================================================================
 
@@ -133,8 +133,8 @@ install_func() {
                     read -p "SMTP порт (обычно 587): " SMTP_PORT
                     read -p "SMTP логин (полный адрес): " SMTP_USER
                     read -p "SMTP пароль: " SMTP_PASS
-                    log "Устанавливаю msmtp и mailx..."
-                    opkg install msmtp mailx >>"$INSTALL_LOG" 2>&1
+                    log "Устанавливаю msmtp..."
+                    opkg install msmtp >>"$INSTALL_LOG" 2>&1
                     cat > /etc/msmtprc <<EOF
 defaults
 auth           on
@@ -213,15 +213,22 @@ echo "$(date '+%Y-%m-%d %H:%M:%S') - Запуск проверки обновл�
 # Функция отправки уведомления
 send_notification() {
     local message="$1"
+    local subject="Обновление прошивки роутера"
+    # Отправка в Telegram
     case "$NOTIFY_TYPE" in
         1|3)
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
                  -d chat_id="${TELEGRAM_CHATID}" -d text="$message" >/dev/null
             ;;
     esac
+    # Отправка Email через msmtp
     case "$NOTIFY_TYPE" in
         2|3)
-            echo "$message" | mail -s "Обновление прошивки роутера" "$EMAIL_TO"
+            if command -v msmtp >/dev/null 2>&1; then
+                echo -e "Subject: $subject\n\n$message" | msmtp "$EMAIL_TO"
+            else
+                echo "msmtp не установлен, отправка email невозможна" >> "$LOG_FILE"
+            fi
             ;;
     esac
 }
@@ -304,6 +311,7 @@ else
     # Отправляем уведомление об ошибке (используем тот же конфиг)
     . /root/notify_config
     MESSAGE="❌ Ошибка при обновлении прошивки. Код: $OWUT_EXIT. Проверьте лог $LOG_FILE"
+    # Отправка уведомления (аналогично check-and-notify.sh)
     case "$NOTIFY_TYPE" in
         1|3)
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
@@ -312,7 +320,9 @@ else
     esac
     case "$NOTIFY_TYPE" in
         2|3)
-            echo "$MESSAGE" | mail -s "Ошибка обновления роутера" "$EMAIL_TO"
+            if command -v msmtp >/dev/null 2>&1; then
+                echo -e "Subject: Ошибка обновления роутера\n\n$MESSAGE" | msmtp "$EMAIL_TO"
+            fi
             ;;
     esac
 fi
@@ -329,15 +339,19 @@ sleep 120  # ждём 2 минуты, чтобы система полность
 if [ -f /root/upgrade_success ]; then
     . /root/notify_config
     MESSAGE="✅ Роутер успешно обновлён и перезагружен! Текущая версия: $(cat /etc/openwrt_release | grep DISTRIB_RELEASE | cut -d"'" -f2)"
+    # Отправка в Telegram
     case "$NOTIFY_TYPE" in
         1|3)
             curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
                  -d chat_id="${TELEGRAM_CHATID}" -d text="$MESSAGE" >/dev/null
             ;;
     esac
+    # Отправка Email через msmtp
     case "$NOTIFY_TYPE" in
         2|3)
-            echo "$MESSAGE" | mail -s "Успешное обновление роутера" "$EMAIL_TO"
+            if command -v msmtp >/dev/null 2>&1; then
+                echo -e "Subject: Успешное обновление роутера\n\n$MESSAGE" | msmtp "$EMAIL_TO"
+            fi
             ;;
     esac
     rm -f /root/upgrade_success
@@ -399,8 +413,8 @@ EOF
 uninstall_func() {
     log "Начинаем удаление всех компонентов..."
 
-    # 1. Удаление пакетов
-    for pkg in owut luci-i18n-attendedsysupgrade-ru msmtp mailx curl; do
+    # 1. Удаление пакетов (убираем mailx)
+    for pkg in owut luci-i18n-attendedsysupgrade-ru msmtp curl; do
         if opkg list-installed | grep -q "^$pkg -"; then
             log "Удаляю пакет $pkg..."
             opkg remove $pkg >>"$INSTALL_LOG" 2>&1
@@ -506,7 +520,7 @@ main_menu() {
             echo
             echo "Вы выбрали УДАЛЕНИЕ всех компонентов."
             echo "Будут выполнены следующие действия:"
-            echo "  - Удаление пакетов: owut, luci-i18n-attendedsysupgrade-ru, msmtp, mailx, curl (если установлены)"
+            echo "  - Удаление пакетов: owut, luci-i18n-attendedsysupgrade-ru, msmtp, curl (если установлены)"
             echo "  - Удаление скриптов из /root/scripts/"
             echo "  - Удаление конфигурационных файлов (/etc/msmtprc, /root/notify_config)"
             echo "  - Удаление заданий cron, связанных с обновлением"
