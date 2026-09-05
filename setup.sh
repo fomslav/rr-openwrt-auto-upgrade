@@ -2,7 +2,7 @@
 # ======================================================================
 #  Установка/удаление автообновления прошивки OpenWrt через ASU
 #  Тестовый сервер: https://sysupgrade.routerich.ru/
-#  Версия 6.3 (использование msmtp напрямую, без mailx)
+#  Версия 6.7 (удаляем msmtp, но не curl)
 #  Репозиторий: https://github.com/fomslav/rr-openwrt-auto-upgrade
 # ======================================================================
 
@@ -19,6 +19,20 @@ INSTALL_LOG="/root/auto-upgrade-install.log"
 CHECK_LOG="/root/auto-upgrade-check.log"
 UPGRADE_LOG="/root/auto-upgrade-upgrade.log"
 BACKUP_DIR="/root/backups"
+
+# --- Функция для получения названия дня по номеру ---------------------
+day_name() {
+    case "$1" in
+        0) echo "воскресенье" ;;
+        1) echo "понедельник" ;;
+        2) echo "вторник" ;;
+        3) echo "среда" ;;
+        4) echo "четверг" ;;
+        5) echo "пятница" ;;
+        6) echo "суббота" ;;
+        *) echo "$1" ;;
+    esac
+}
 
 # --- Функция логирования -----------------------------------------------
 log() {
@@ -362,13 +376,17 @@ EOF
     chmod +x /root/scripts/auto-upgrade.sh
     chmod +x /root/scripts/send-success.sh
 
-    # 7. Настройка cron
+    # 7. Настройка cron с комментариями, содержащими названия дней
     log "Настройка заданий cron..."
+    # Удаляем старые записи
     sed -i '/check-and-notify.sh/d' /etc/crontabs/root 2>/dev/null
     sed -i '/auto-upgrade.sh/d' /etc/crontabs/root 2>/dev/null
-    echo "# Проверка обновлений и уведомление (каждую субботу в 20:00)" >> /etc/crontabs/root
+    sed -i '/# Проверка обновлений/d' /etc/crontabs/root 2>/dev/null
+    sed -i '/# Автоматическое обновление/d' /etc/crontabs/root 2>/dev/null
+    # Добавляем новые с комментариями
+    echo "# Проверка обновлений и уведомление ($(day_name $check_day) в $check_time)" >> /etc/crontabs/root
     echo "$check_time * * $check_day /root/scripts/check-and-notify.sh" >> /etc/crontabs/root
-    echo "# Автоматическое обновление (каждое воскресенье в 3:00)" >> /etc/crontabs/root
+    echo "# Автоматическое обновление ($(day_name $upgrade_day) в $upgrade_time)" >> /etc/crontabs/root
     echo "$upgrade_time * * $upgrade_day /root/scripts/auto-upgrade.sh" >> /etc/crontabs/root
     /etc/init.d/cron restart
 
@@ -379,14 +397,16 @@ EOF
     echo "/root/scripts/send-success.sh &" >> /etc/rc.local
     echo "exit 0" >> /etc/rc.local
 
-    # 9. Итоговый экран
+    # 9. Итоговый экран (с названиями дней)
+    check_day_name=$(day_name "$check_day")
+    upgrade_day_name=$(day_name "$upgrade_day")
     echo
     echo "============================================================"
     echo "✅ Установка и настройка завершены!"
     echo "============================================================"
     echo "📌 Расписание:"
-    echo "   - Проверка обновлений: день $check_day в $check_time"
-    echo "   - Установка обновлений: день $upgrade_day в $upgrade_time"
+    echo "   - Проверка обновлений: $check_day_name в $check_time"
+    echo "   - Установка обновлений: $upgrade_day_name в $upgrade_time"
     echo
     echo "📩 Уведомления:"
     case "$notify_choice" in
@@ -413,8 +433,8 @@ EOF
 uninstall_func() {
     log "Начинаем удаление всех компонентов..."
 
-    # 1. Удаление пакетов (убираем mailx)
-    for pkg in owut luci-i18n-attendedsysupgrade-ru msmtp curl; do
+    # 1. Удаление пакетов, которые мы устанавливаем (кроме curl)
+    for pkg in owut luci-i18n-attendedsysupgrade-ru msmtp; do
         if opkg list-installed | grep -q "^$pkg -"; then
             log "Удаляю пакет $pkg..."
             opkg remove $pkg >>"$INSTALL_LOG" 2>&1
@@ -429,7 +449,7 @@ uninstall_func() {
         rm -rf /root/scripts
     fi
 
-    # 3. Удаление конфига msmtp
+    # 3. Удаление конфига msmtp (если создан)
     if [ -f /etc/msmtprc ]; then
         log "Удаляю /etc/msmtprc ..."
         rm -f /etc/msmtprc
@@ -448,7 +468,7 @@ uninstall_func() {
     log "Удаляю задания cron..."
     sed -i '/check-and-notify.sh/d' /etc/crontabs/root 2>/dev/null
     sed -i '/auto-upgrade.sh/d' /etc/crontabs/root 2>/dev/null
-    sed -i '/# Проверка обновлений и уведомление/d' /etc/crontabs/root 2>/dev/null
+    sed -i '/# Проверка обновлений/d' /etc/crontabs/root 2>/dev/null
     sed -i '/# Автоматическое обновление/d' /etc/crontabs/root 2>/dev/null
     /etc/init.d/cron restart
 
@@ -520,7 +540,7 @@ main_menu() {
             echo
             echo "Вы выбрали УДАЛЕНИЕ всех компонентов."
             echo "Будут выполнены следующие действия:"
-            echo "  - Удаление пакетов: owut, luci-i18n-attendedsysupgrade-ru, msmtp, curl (если установлены)"
+            echo "  - Удаление пакетов: owut, luci-i18n-attendedsysupgrade-ru, msmtp (если установлены)"
             echo "  - Удаление скриптов из /root/scripts/"
             echo "  - Удаление конфигурационных файлов (/etc/msmtprc, /root/notify_config)"
             echo "  - Удаление заданий cron, связанных с обновлением"
@@ -528,6 +548,7 @@ main_menu() {
             echo "  - Удаление настройки сервера ASU (параметр url)"
             echo "  - Удаление временных флагов"
             echo "  - Логи и бэкапы останутся нетронутыми"
+            echo "  - Пакет curl НЕ удаляется (может использоваться системой)"
             echo
             read -p "Продолжить? (y/N): " confirm
             if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
